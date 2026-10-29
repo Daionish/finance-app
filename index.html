@@ -57,6 +57,22 @@ input,select{width:100%;font:inherit;font-size:17px;color:var(--ink);background:
 .btn{width:100%;margin-top:18px;padding:14px;border-radius:14px;background:var(--acc);color:var(--onacc);font-weight:600}
 .btn.sec{background:none;color:var(--mut);margin-top:4px}
 .ayuda{font-size:13px;color:var(--mut);margin:8px 0 0}
+
+:root{--fijo:#0b7285}:root[data-theme=dark]{--fijo:#3bc9db}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--fijo:#3bc9db}}
+.seg{display:flex;gap:4px;background:var(--line);border-radius:14px;padding:4px;margin-top:6px}
+.seg button{flex:1;padding:9px 6px;border-radius:11px;font-size:14px;font-weight:600;color:var(--mut);line-height:1.2}
+.seg button small{display:block;font-weight:500;font-size:12px}
+.seg button[aria-pressed=true]{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(16,24,40,.15)}
+.seg button[data-k=fijo][aria-pressed=true]{background:var(--fijo);color:var(--bg)}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:12px 0 2px;scrollbar-width:none}
+.chips button{flex:none;display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-size:14px}
+.chips button[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chips s{width:8px;height:8px;border-radius:50%}
+.leyenda .cl{cursor:pointer}
+.it{border-left:4px solid transparent;padding-left:10px}
+.it.fijo{border-left-color:var(--fijo)}
+.badge{font-size:11px;font-weight:600;color:var(--fijo);border:1px solid var(--fijo);border-radius:6px;padding:0 5px;margin-left:8px}
 @media(prefers-reduced-motion:no-preference){dialog[open]{animation:sube .2s ease-out}@keyframes sube{from{transform:translateY(24px);opacity:.4}}}
 </style>
 </head>
@@ -70,11 +86,13 @@ input,select{width:100%;font:inherit;font-size:17px;color:var(--ink);background:
     </div>
     <button class="ic" id="ajustes" aria-label="Ajustes">⚙</button>
   </header>
+  <div class="seg" id="kindTabs"></div>
 
   <section class="total">
-    <small>Gastado este mes</small>
+    <small id="tTitulo">Gastado este mes</small>
     <strong class="num" id="total">0,00 €</strong>
     <span class="delta num" id="delta"></span>
+    <div class="chips" id="chips"></div>
     <div class="cinta" id="cinta" role="img" aria-label="Reparto por categoría"></div>
     <div class="leyenda" id="leyenda"></div>
   </section>
@@ -105,6 +123,8 @@ input,select{width:100%;font:inherit;font-size:17px;color:var(--ink);background:
   </div>
   <label for="fCat">Categoría</label>
   <select id="fCat"></select>
+  <label>Tipo de gasto</label>
+  <div class="seg" id="fKind"><button type="button" data-k="var" aria-pressed="true">Variable</button><button type="button" data-k="fijo" aria-pressed="false">Fijo</button></div>
   <label for="fCuenta">Cuenta</label>
   <select id="fCuenta"></select>
   <p class="ayuda" id="fErr" style="color:var(--bad)" hidden></p>
@@ -125,38 +145,52 @@ input,select{width:100%;font:inherit;font-size:17px;color:var(--ink);background:
 
 <script>
 const $=s=>document.querySelector(s);
-const DEF=[['Housing','Rent'],['Housing','Utilities'],['Housing','Maintenance'],['Food','Groceries'],['Food','Restaurants & takeaway'],['Transport','Public transport'],['Transport','Car costs'],['Health','Medical & pharmacy'],['Sports & Training','Memberships'],['Leisure','Entertainment'],['Leisure','Travel'],['Leisure','Games & media'],['Shopping','Clothing'],['Shopping','Electronics'],['Subscriptions','Software & digital'],['Education','Books & courses'],['Other','Gifts'],['Other','Uncategorized']];
+const DEF=[['Housing','Rent','fijo'],['Housing','Utilities','fijo'],['Housing','Maintenance','var'],['Food','Groceries','var'],['Food','Restaurants & takeaway','var'],['Transport','Public transport','var'],['Transport','Car costs','var'],['Health','Medical & pharmacy','var'],['Sports & Training','Memberships','fijo'],['Leisure','Entertainment','var'],['Leisure','Travel','var'],['Leisure','Games & media','var'],['Shopping','Clothing','var'],['Shopping','Electronics','var'],['Subscriptions','Software & digital','fijo'],['Education','Books & courses','var'],['Other','Gifts','var'],['Other','Uncategorized','var']];
 const COL=['#3b5bdb','#0ca678','#f08c00','#e64980','#7048e8','#1098ad','#d9480f','#74b816','#868e96'];
 let S=JSON.parse(localStorage.getItem('gastos_v1')||'{}');
 S.rem=S.rem||[];S.pend=S.pend||[];S.cfg=S.cfg||{url:'',token:''};S.coa=S.coa||DEF;S.acc=S.acc||['Openbank Nómina','B100 Ahorro'];
+if(S.coa.some(c=>c.length<3))S.coa=DEF;
 const save=()=>localStorage.setItem('gastos_v1',JSON.stringify(S));
 const eur=n=>n.toLocaleString('es-ES',{style:'currency',currency:'EUR'});
 const hoy=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 const mk=d=>{const [y,m]=d.split('-');return +y*12+(+m-1)};
-let ym=mk(hoy()),orden='fecha';
+let ym=mk(hoy()),orden='fecha',kF='all',cF=null,fK='var';
 const todos=()=>[...S.rem,...S.pend];
+const kindOf=t=>t.kind||((S.coa.find(c=>c[1]===t.sub)||[])[2])||'var';
 const delMes=k=>todos().filter(t=>mk(t.date)===k);
+const pasa=t=>(kF==='all'||kindOf(t)===kF)&&(!cF||t.cat===cF);
+const catList=()=>[...new Set([...S.coa.map(c=>c[0]),...todos().map(t=>t.cat)])].sort();
+const colC=c=>COL[catList().indexOf(c)%COL.length];
 const suma=a=>a.reduce((s,t)=>s+t.amount,0);
 
 function render(){
   const d=new Date(Math.floor(ym/12),ym%12,1);
   $('#mesTxt').textContent=d.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
-  const it=delMes(ym),tot=suma(it),ant=suma(delMes(ym-1));
+  const base=delMes(ym);
+  const bk=k=>suma(base.filter(t=>k==='all'||kindOf(t)===k));
+  $('#kindTabs').innerHTML=[['all','Todos'],['fijo','Fijos'],['var','Variables']].map(([k,l])=>`<button data-k="${k}" aria-pressed="${kF===k}">${l}<small class="num">${eur(bk(k))}</small></button>`).join('');
+  document.querySelectorAll('#kindTabs button').forEach(b=>b.onclick=()=>{kF=b.dataset.k;cF=null;render()});
+  const kb=base.filter(t=>kF==='all'||kindOf(t)===kF),gc={};
+  kb.forEach(t=>gc[t.cat]=(gc[t.cat]||0)+t.amount);
+  if(cF&&!(cF in gc))cF=null;
+  $('#chips').innerHTML=`<button data-c="" aria-pressed="${!cF}">Todas</button>`+Object.entries(gc).sort((a,b)=>b[1]-a[1]).map(([c])=>`<button data-c="${esc(c)}" aria-pressed="${cF===c}"><s style="background:${colC(c)}"></s>${esc(c)}</button>`).join('');
+  document.querySelectorAll('#chips button').forEach(b=>b.onclick=()=>{cF=b.dataset.c||null;render()});
+  const it=base.filter(pasa),tot=suma(it),ant=suma(delMes(ym-1).filter(pasa));
+  $('#tTitulo').textContent='Gastado'+(cF?' en '+cF:kF==='fijo'?' en fijos':kF==='var'?' en variables':'')+' este mes';
   $('#total').textContent=eur(tot);
   $('#delta').textContent=ant?(tot>=ant?'+':'−')+eur(Math.abs(tot-ant))+' frente al mes anterior':'';
-  const g={};it.forEach(t=>g[t.cat]=(g[t.cat]||0)+t.amount);
-  const cs=Object.entries(g).sort((a,b)=>b[1]-a[1]);
-  $('#cinta').innerHTML=cs.map(([c,v],i)=>`<i style="flex:${v};background:${COL[Math.min(i,8)]}" title="${c}"></i>`).join('');
-  $('#leyenda').innerHTML=cs.length?cs.map(([c,v],i)=>`<div><s style="background:${COL[Math.min(i,8)]}"></s><span>${c}</span><b class="num">${eur(v)}</b><em class="num">${Math.round(v/tot*100)} %</em></div>`).join(''):'<div class="vacio">Aún no hay gastos este mes. Pulsa «Añadir gasto».</div>';
-  // barras 6 meses
-  const ms=[5,4,3,2,1,0].map(i=>ym-i),vs=ms.map(k=>suma(delMes(k))),mx=Math.max(...vs,1);
+  const key=t=>cF?t.sub:t.cat,g={};it.forEach(t=>g[key(t)]=(g[key(t)]||0)+t.amount);
+  const cs=Object.entries(g).sort((a,b)=>b[1]-a[1]),col=(c,i)=>cF?COL[i%COL.length]:colC(c);
+  $('#cinta').innerHTML=cs.map(([c,v],i)=>`<i style="flex:${v};background:${col(c,i)}" title="${esc(c)}"></i>`).join('');
+  $('#leyenda').innerHTML=cs.length?cs.map(([c,v],i)=>`<div class="${cF?'':'cl'}" data-c="${esc(c)}"><s style="background:${col(c,i)}"></s><span>${esc(c)}</span><b class="num">${eur(v)}</b><em class="num">${Math.round(v/tot*100)} %</em></div>`).join(''):'<div class="vacio">Aún no hay gastos aquí. Pulsa «Añadir gasto».</div>';
+  if(!cF)document.querySelectorAll('#leyenda .cl').forEach(r=>r.onclick=()=>{cF=r.dataset.c;render()});
+  const ms=[5,4,3,2,1,0].map(i=>ym-i),vs=ms.map(k=>suma(delMes(k).filter(pasa))),mx=Math.max(...vs,1);
   $('#barras').innerHTML=`<svg viewBox="0 0 300 120" width="100%" role="img" aria-label="Gasto de los últimos 6 meses">`+ms.map((k,i)=>{
     const h=Math.round(vs[i]/mx*80),x=8+i*49,cur=k===ym;
     const l=new Date(Math.floor(k/12),k%12,1).toLocaleDateString('es-ES',{month:'short'});
-    return `<rect x="${x}" y="${92-h}" width="34" height="${Math.max(h,2)}" rx="6" fill="${cur?'var(--acc)':'var(--line)'}"/><text x="${x+17}" y="108" text-anchor="middle">${l}</text>${vs[i]?`<text x="${x+17}" y="${86-h}" text-anchor="middle" style="fill:var(--ink)">${Math.round(vs[i])}</text>`:''}`}).join('')+`</svg>`;
-  // lista
+    return `<rect x="${x}" y="${92-h}" width="34" height="${Math.max(h,2)}" rx="6" fill="${cur?(kF==='fijo'?'var(--fijo)':'var(--acc)'):'var(--line)'}"/><text x="${x+17}" y="108" text-anchor="middle">${l}</text>${vs[i]?`<text x="${x+17}" y="${86-h}" text-anchor="middle" style="fill:var(--ink)">${Math.round(vs[i])}</text>`:''}`}).join('')+`</svg>`;
   const L=[...it].sort((a,b)=>orden==='fecha'?(b.date.localeCompare(a.date)||b.id-a.id):b.amount-a.amount);
-  $('#lista').innerHTML=L.length?L.map(t=>`<div class="it"><div><b>${esc(t.title||t.sub)}</b><small>${esc(t.cat)}, ${new Date(t.date+'T12:00').toLocaleDateString('es-ES',{day:'numeric',month:'short'})}${t.pend?' (sin sincronizar)':''}</small></div><span class="imp num">${eur(t.amount)}</span></div>`).join(''):'<div class="vacio">Sin gastos</div>';
+  $('#lista').innerHTML=L.length?L.map(t=>{const f=kindOf(t)==='fijo';return `<div class="it${f?' fijo':''}"><div><b>${esc(t.title||t.sub)}${f?'<span class="badge">Fijo</span>':''}</b><small>${esc(t.cat)}${cF?'':''}, ${esc(t.sub)}, ${new Date(t.date+'T12:00').toLocaleDateString('es-ES',{day:'numeric',month:'short'})}${t.pend?' (sin sincronizar)':''}</small></div><span class="imp num">${eur(t.amount)}</span></div>`}).join(''):'<div class="vacio">Sin gastos</div>';
   $('#oFecha').setAttribute('aria-pressed',orden==='fecha');$('#oImp').setAttribute('aria-pressed',orden==='imp');
 }
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -166,12 +200,13 @@ function rellenaForm(){
   $('#fCat').innerHTML=S.coa.map(([c,s],i)=>`<option value="${i}">${esc(c)}, ${esc(s)}</option>`).join('');
   $('#fCuenta').innerHTML=S.acc.map(a=>`<option>${esc(a)}</option>`).join('');
 }
-function abre(){rellenaForm();$('#fTitulo').value='';$('#fImporte').value='';$('#fFecha').value=hoy();$('#fErr').hidden=true;$('#dNuevo').showModal();$('#fTitulo').focus()}
+const setK=k=>{fK=k;document.querySelectorAll('#fKind button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.k===k))};
+function abre(){rellenaForm();setK(S.coa[0][2]||'var');$('#fTitulo').value='';$('#fImporte').value='';$('#fFecha').value=hoy();$('#fErr').hidden=true;$('#dNuevo').showModal();$('#fTitulo').focus()}
 function guarda(){
   const amount=parseFloat(String($('#fImporte').value).replace(',','.')),title=$('#fTitulo').value.trim();
   if(!title||!(amount>0)){const e=$('#fErr');e.textContent='Escribe un título y un importe mayor que 0.';e.hidden=false;return}
   const [cat,sub]=S.coa[+$('#fCat').value];
-  S.pend.push({id:Date.now(),date:$('#fFecha').value||hoy(),title,amount:Math.round(amount*100)/100,cat,sub,acc:$('#fCuenta').value,pend:true});
+  S.pend.push({id:Date.now(),date:$('#fFecha').value||hoy(),title,amount:Math.round(amount*100)/100,cat,sub,acc:$('#fCuenta').value,kind:fK,pend:true});
   save();$('#dNuevo').close();ym=mk(S.pend[S.pend.length-1].date);render();sync();
 }
 
@@ -181,14 +216,14 @@ async function sync(){
   try{
     estado('Sincronizando…');
     for(const p of [...S.pend]){
-      const r=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({token,date:p.date,account:p.acc,type:'Expense',category:p.cat,subcategory:p.sub,amount:p.amount,currency:'EUR',description:p.title})});
+      const r=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({token,date:p.date,account:p.acc,type:'Expense',category:p.cat,subcategory:p.sub,amount:p.amount,currency:'EUR',description:p.title,tag:p.kind==='fijo'?'fijo':'variable'})});
       const j=await r.json();if(!j.ok)throw new Error(j.error||'error');
       S.pend=S.pend.filter(x=>x.id!==p.id);save();
     }
     const j=await (await fetch(url+'?token='+encodeURIComponent(token))).json();
     if(j.error)throw new Error(j.error);
-    S.rem=j.transactions.filter(r=>r[3]==='Expense').map((r,i)=>{const d=new Date(r[1]);return {id:i,date:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),title:r[9]||r[5],amount:+r[8]||+r[6]||0,cat:r[4],sub:r[5],acc:r[2]}});
-    const c=j.coa.filter(r=>r[0]==='Expense').map(r=>[r[1],r[2]]);if(c.length)S.coa=c;
+    S.rem=j.transactions.filter(r=>r[3]==='Expense').map((r,i)=>{const d=new Date(r[1]);return {id:i,date:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),title:r[9]||r[5],amount:+r[8]||+r[6]||0,cat:r[4],sub:r[5],acc:r[2],kind:/^fijo$/i.test(r[10])?'fijo':/^variable$/i.test(r[10])?'var':(r[13]==='Fixed'?'fijo':'var')}});
+    const c=j.coa.filter(r=>r[0]==='Expense').map(r=>[r[1],r[2],r[3]==='Fixed'?'fijo':'var']);if(c.length)S.coa=c;
     if(j.accounts.length)S.acc=j.accounts;
     save();render();estado('Sincronizado');
   }catch(e){estado('Sin conexión: se guarda en el móvil y se reintenta')}
@@ -196,6 +231,7 @@ async function sync(){
 
 $('#prev').onclick=()=>{ym--;render()};$('#next').onclick=()=>{ym++;render()};
 $('#oFecha').onclick=()=>{orden='fecha';render()};$('#oImp').onclick=()=>{orden='imp';render()};
+$('#fCat').onchange=()=>setK(S.coa[+$('#fCat').value][2]||'var');document.querySelectorAll('#fKind button').forEach(b=>b.onclick=()=>setK(b.dataset.k));
 $('#nuevo').onclick=abre;$('#guardar').onclick=guarda;$('#cancelar').onclick=()=>$('#dNuevo').close();
 $('#ajustes').onclick=()=>{$('#cUrl').value=S.cfg.url;$('#cTok').value=S.cfg.token;$('#dAjustes').showModal()};
 $('#cCerrar').onclick=()=>$('#dAjustes').close();
